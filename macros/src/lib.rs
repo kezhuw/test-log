@@ -10,6 +10,7 @@ use quote::quote;
 
 use syn::parse::Parse;
 use syn::parse_macro_input;
+use syn::parse_quote;
 use syn::Attribute;
 use syn::Expr;
 use syn::ItemFn;
@@ -44,12 +45,6 @@ fn parse_attrs(attrs: Vec<Attribute>) -> syn::Result<(AttributeArgs, Vec<Attribu
 }
 
 fn try_test(attr: TokenStream, input: ItemFn) -> syn::Result<Tokens> {
-  let inner_test = if attr.is_empty() {
-    quote! { ::core::prelude::v1::test }
-  } else {
-    attr.into()
-  };
-
   let ItemFn {
     attrs,
     vis,
@@ -61,9 +56,24 @@ fn try_test(attr: TokenStream, input: ItemFn) -> syn::Result<Tokens> {
   let logging_init = expand_logging_init(&attribute_args);
   let tracing_init = expand_tracing_init(&attribute_args);
 
+  let (inner_test, generated_test) = if attr.is_empty() {
+    let test_attr: syn::Attribute = parse_quote! { #[::core::prelude::v1::test] };
+    let has_test = ignored_attrs.iter().any(|attr| *attr == test_attr);
+    let generated_test = if has_test {
+      quote! {}
+    } else {
+      quote! { #test_attr }
+    };
+    (quote! {}, generated_test)
+  } else {
+    let attr: Tokens = attr.into();
+    (quote! { #[#attr] }, quote! {})
+  };
+
   let result = quote! {
-    #[#inner_test]
+    #inner_test
     #(#ignored_attrs)*
+    #generated_test
     #vis #sig {
       // We put all initialization code into a separate module here in
       // order to prevent potential ambiguities that could result in
