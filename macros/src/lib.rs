@@ -10,7 +10,6 @@ use quote::quote;
 
 use syn::parse::Parse;
 use syn::parse_macro_input;
-use syn::parse_quote;
 use syn::Attribute;
 use syn::Expr;
 use syn::ItemFn;
@@ -44,6 +43,27 @@ fn parse_attrs(attrs: Vec<Attribute>) -> syn::Result<(AttributeArgs, Vec<Attribu
   }
 }
 
+// Check whether given attribute is `#[test]` or `#[::core::prelude::v1::test]`.
+fn is_test_attribute(attr: &Attribute) -> bool {
+  let path = match &attr.meta {
+    syn::Meta::Path(path) => path,
+    _ => return false,
+  };
+  let segments = ["core", "prelude", "v1", "test"];
+  if path.leading_colon.is_none() {
+    return path.segments.len() == 1
+      && path.segments[0].arguments.is_none()
+      && path.segments[0].ident == "test";
+  } else if path.segments.len() != segments.len() {
+    return false;
+  }
+  path
+    .segments
+    .iter()
+    .zip(segments)
+    .all(|(segment, path)| segment.arguments.is_none() && segment.ident == path)
+}
+
 fn try_test(attr: TokenStream, input: ItemFn) -> syn::Result<Tokens> {
   let ItemFn {
     attrs,
@@ -57,16 +77,15 @@ fn try_test(attr: TokenStream, input: ItemFn) -> syn::Result<Tokens> {
   let tracing_init = expand_tracing_init(&attribute_args);
 
   let (inner_test, generated_test) = if attr.is_empty() {
-    let test_attr: syn::Attribute = parse_quote! { #[::core::prelude::v1::test] };
-    let has_test = ignored_attrs.iter().any(|attr| *attr == test_attr);
+    let has_test = ignored_attrs.iter().any(is_test_attribute);
     let generated_test = if has_test {
       quote! {}
     } else {
-      quote! { #test_attr }
+      quote! { #[::core::prelude::v1::test]}
     };
     (quote! {}, generated_test)
   } else {
-    let attr: Tokens = attr.into();
+    let attr = Tokens::from(attr);
     (quote! { #[#attr] }, quote! {})
   };
 
